@@ -1,0 +1,54 @@
+with cte as(select *,
+				   RANK() over(partition by employee_id order by change_date desc) as rn,
+                   RANK() over(partition by employee_id order by change_date asc) as rn_asc
+                   from twohundred.salary_history),
+latest_salary_cte as(select employee_id,
+							salary as latest_salary
+							from cte where rn = 1)
+,promotions_cte as(
+				select employee_id,COUNT(*) as number_of_promotions from cte
+                where promotion = "Yes"
+                group by employee_id
+),
+prev_salary_cte as (
+				select *,
+				LAG(salary) over(partition by employee_id order by change_date asc) as prev_salary,
+                LAG(change_date) over(partition by employee_id order by change_date asc)as prev_change_date
+				from twohundred.salary_history),
+percentage_increase_cte as (select employee_id,
+							max(cast(((salary - prev_salary) / prev_salary) * 100 as decimal(4,2))) as max_salary_growth
+							from prev_salary_cte
+                            group by employee_id),
+salary_decreased_cte as(select distinct(employee_id),
+		"N" as never_decreased
+from prev_salary_cte
+where prev_salary > salary),
+
+avg_months_cte as(
+					select employee_id,
+                    cast(AVG(timestampdiff(month, prev_change_date,change_date)) as decimal(3,1)) as no_of_months 
+					from prev_salary_cte
+					group by employee_id)
+,salary_ratio_cte as(select employee_id,
+	   cast(max(case when rn = 1 then salary end) / max(case when rn_asc = 1 then salary end) as decimal(4,2)) as salary_growth_ratio,
+       min(change_date) as min_change_date
+from cte
+group by employee_id)
+
+,salary_growth_rank_cte as(select employee_id,
+		RANK() over(order by salary_growth_ratio desc, min_change_date asc) as ranking
+from salary_ratio_cte)
+
+
+-- select  e.employee_id,e.name,l.latest_salary,ifnull(p.number_of_promotions,0) as no_of_promotions,
+-- 		msg.max_salary_growth,
+--         IFNULL(sdc.never_decreased,"Y") as never_decreased,
+--         amc.no_of_months as number_of_months,
+--         sgrc.ranking as ranking
+-- from employees e
+-- left join latest_salary_cte l on e.employee_id = l.employee_id
+-- left join promotions_cte p on e.employee_id = p.employee_id
+-- left join percentage_increase_cte msg on e.employee_id = msg.employee_id
+-- left join salary_decreased_cte sdc on e.employee_id = sdc.employee_id
+-- left join avg_months_cte amc on e.employee_id = amc.employee_id
+-- left join salary_growth_rank_cte sgrc on e.employee_id = sgrc.employee_id

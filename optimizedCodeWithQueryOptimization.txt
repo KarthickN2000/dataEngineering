@@ -1,0 +1,50 @@
+with cte as(select *,
+				   RANK() over(partition by employee_id order by change_date desc) as rn,
+                   RANK() over(partition by employee_id order by change_date asc) as rn_asc,
+                   LAG(salary) over(partition by employee_id order by change_date asc) as prev_salary,
+				   LAG(change_date) over(partition by employee_id order by change_date asc)as prev_change_date
+                   from twohundred.salary_history),
+
+salary_ratio_cte as(select employee_id,
+	   cast(max(case when rn = 1 then salary end) / max(case when rn_asc = 1 then salary end) as decimal(4,2)) as salary_growth_ratio,
+       min(change_date) as min_change_date
+from cte
+group by employee_id)
+
+-- optimizing aand lowering the number of ctes
+
+,current_modi_cte as(select employee_id,
+max(ifnull(case 
+	when rn = 1 then salary 
+end,0)) as latest_salary,
+sum(case 
+	when promotion = "Yes" then 1 else 0
+end) as no_of_promotions,
+max(cast(((salary - prev_salary) / prev_salary) * 100 as decimal(4,2))) as max_salary_growth,
+
+case
+	when max(case
+	when prev_salary > salary then 1 
+    else 0
+end) = 0 then "Y"
+else "N" 
+end as never_decreased,
+cast(AVG(timestampdiff(month, prev_change_date,change_date)) as decimal(3,1)) as no_of_months
+
+from cte
+group by employee_id)
+
+select cmc.*,
+RANK() over(order by src.salary_growth_ratio desc, src.min_change_date asc) as ranking
+from current_modi_cte cmc
+left join salary_ratio_cte src on cmc.employee_id = src.employee_id
+
+
+
+
+
+
+
+
+
+
